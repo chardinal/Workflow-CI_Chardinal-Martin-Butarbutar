@@ -1,0 +1,15 @@
+name: retail-transaction-clustering-env
+
+channels:
+  - defaults
+  - conda-forge
+
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+      - mlflow==2.10.0
+      - pandas==2.2.0
+      - scikit-learn==1.4.0
+      - joblib==1.3.2
+      - numpy==1.26.3
