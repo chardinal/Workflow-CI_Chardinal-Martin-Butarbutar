@@ -1,0 +1,133 @@
+name: MLflow CI Retraining
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-mlflow
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install MLflow and dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mlflow==2.10.0 pandas==2.2.0 scikit-learn==1.4.0 joblib==1.3.2 numpy==1.26.3
+
+    - name: Verify project structure
+      run: |
+        echo "=== Checking project structure ==="
+        ls -la
+        echo ""
+        echo "=== Checking MLProject folder ==="
+        ls -la MLProject/
+        echo ""
+        echo "=== Verifying dataset ==="
+        if [ -f "MLProject/Retail_Transaction_Dataset_preprocessing.csv" ]; then
+          echo "✅ Dataset found"
+          wc -l MLProject/Retail_Transaction_Dataset_preprocessing.csv
+          echo "First 5 rows:"
+          head -n 5 MLProject/Retail_Transaction_Dataset_preprocessing.csv
+        else
+          echo "❌ Dataset not found!"
+          exit 1
+        fi
+
+    - name: Run MLflow Project
+      run: |
+        echo "🚀 Starting MLflow training..."
+        cd MLProject
+        mlflow run . --env-manager=local
+      env:
+        MLFLOW_TRACKING_URI: file:./mlruns
+
+    - name: List generated artifacts
+      run: |
+        echo "=== Generated Artifacts ==="
+        if [ -d "MLProject/artifacts" ]; then
+          ls -lh MLProject/artifacts/
+          echo ""
+          echo "=== Artifact Contents ==="
+          cat MLProject/artifacts/metadata.txt || true
+        fi
+        if [ -d "MLProject/mlruns" ]; then
+          echo "=== MLflow Runs ==="
+          find MLProject/mlruns -type f -name "*.pkl" -o -name "*.json" | head -20
+        fi
+
+    - name: Upload model artifacts to GitHub
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: model-artifacts-${{ github.run_number }}
+        path: |
+          MLProject/artifacts/
+          MLProject/mlruns/
+        retention-days: 90
+
+    - name: Create release with artifacts
+      if: github.ref == 'refs/heads/main' && success()
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: model-v${{ github.run_number }}
+        name: Model Release v${{ github.run_number }}
+        body: |
+          ## 🎉 Model Training Completed Successfully!
+          
+          ### 📊 Model Information
+          - **Algorithm:** KMeans Clustering
+          - **Clusters:** 4
+          - **Build:** #${{ github.run_number }}
+          - **Commit:** ${{ github.sha }}
+          
+          ### 📦 Artifacts Included
+          - `kmeans_model.pkl` - Trained KMeans model
+          - `scaler.pkl` - StandardScaler for data preprocessing
+          
+          ### 📥 How to Use
+          ```python
+          import joblib
+          model = joblib.load('kmeans_model.pkl')
+          scaler = joblib.load('scaler.pkl')
+          ```
+        files: |
+          MLProject/artifacts/kmeans_model.pkl
+          MLProject/artifacts/scaler.pkl
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Training Summary
+      if: success()
+      run: |
+        echo "✅ ============================================"
+        echo "✅ Training completed successfully!"
+        echo "✅ ============================================"
+        echo "📦 Artifacts saved to GitHub Actions"
+        echo "🏷️  Release created: model-v${{ github.run_number }}"
+        echo "📊 View artifacts in Actions tab"
+        echo "🔗 Download model from Releases"
+        echo "============================================"
